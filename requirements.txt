@@ -4,3 +4,4 @@ httpx
 PyPDF2
 anthropic[aiohttp]
 Flask
+Flask-Cors
