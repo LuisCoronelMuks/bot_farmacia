@@ -183,6 +183,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ========= Flask API =========
 web_app = Flask(__name__)
+from flask_cors import CORS
+CORS(web_app)
 
 @web_app.route("/consulta", methods=["POST"])
 def consulta():
