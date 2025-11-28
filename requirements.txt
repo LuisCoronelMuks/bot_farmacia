@@ -3,3 +3,4 @@ anthropic
 httpx
 PyPDF2
 anthropic[aiohttp]
+Flask
