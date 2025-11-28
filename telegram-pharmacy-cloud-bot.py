@@ -186,15 +186,45 @@ web_app = Flask(__name__)
 from flask_cors import CORS
 CORS(web_app)
 
+### @web_app.route("/consulta", methods=["POST"])
+### def consulta():
+###     pregunta = request.json.get("pregunta")
+###     catalog = get_catalog()
+###     if not catalog:
+###         return jsonify({"error": "Sin catálogo cargado"}), 400
+###     content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {pregunta}\nResponde en español."
+###     # Aquí podrías llamar a Anthropic igual que en handle_message (simplificado por ahora)
+###     return jsonify({"respuesta": f"Procesando pregunta: {pregunta}"})
+
 @web_app.route("/consulta", methods=["POST"])
 def consulta():
     pregunta = request.json.get("pregunta")
     catalog = get_catalog()
     if not catalog:
         return jsonify({"error": "Sin catálogo cargado"}), 400
+
     content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {pregunta}\nResponde en español."
-    # Aquí podrías llamar a Anthropic igual que en handle_message (simplificado por ahora)
-    return jsonify({"respuesta": f"Procesando pregunta: {pregunta}"})
+
+    # Llamada a Anthropic (igual que en handle_message)
+    import asyncio
+
+    async def call_anthropic():
+        async with AsyncAnthropic(api_key=ANTHROPIC_API_KEY, http_client=DefaultAioHttpClient(), timeout=60.0, max_retries=2) as client:
+            model_id = await pick_available_model(client)
+            message = await client.messages.create(
+                model=model_id,
+                max_tokens=2048,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": content}],
+            )
+            response_text = "".join(
+                getattr(b, "text", "") for b in getattr(message, "content", [])
+                if getattr(b, "type", "") == "text"
+            ) or "(Sin contenido)"
+            return response_text
+
+    respuesta = asyncio.run(call_anthropic())
+    return jsonify({"respuesta": respuesta})
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
