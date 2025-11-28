@@ -1,10 +1,11 @@
 
 # -*- coding: utf-8 -*-
 import os
+import threading
 import logging
+from flask import Flask, request, jsonify
 from pathlib import Path
 from datetime import datetime
-
 import PyPDF2
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
@@ -15,9 +16,8 @@ from telegram.ext import (
 from anthropic import AsyncAnthropic, DefaultAioHttpClient
 
 # ========= CONFIG =========
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")            # set en Render
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")      # set en Render
-
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 PDF_FOLDER = os.getenv("PDF_FOLDER", "catalogos_pdfs")
 CATALOG_FILE = os.getenv("CATALOG_FILE", "catalogo_procesado.txt")
 
@@ -94,7 +94,6 @@ INSTRUCCIONES:
 PREFERRED_ALIAS = "claude-sonnet-4-5"
 
 async def pick_available_model(client: AsyncAnthropic) -> str:
-    # 1) probar alias moderno
     try:
         _ = await client.messages.create(
             model=PREFERRED_ALIAS, max_tokens=8, system="Test",
@@ -102,26 +101,17 @@ async def pick_available_model(client: AsyncAnthropic) -> str:
         )
         return PREFERRED_ALIAS
     except Exception:
-        # 2) listar y elegir sonnet/haiku
         page = await client.models.list()
-        ids = []
-        for m in getattr(page, "data", []):
-            mid = getattr(m, "id", None) or (isinstance(m, dict) and m.get("id"))
-            if mid:
-                ids.append(mid)
+        ids = [getattr(m, "id", None) or (isinstance(m, dict) and m.get("id")) for m in getattr(page, "data", [])]
         for mid in ids:
-            if "sonnet" in mid:
-                return mid
+            if "sonnet" in mid: return mid
         for mid in ids:
-            if "haiku" in mid:
-                return mid
+            if "haiku" in mid: return mid
         raise RuntimeError("No hay modelos válidos para esta API key.")
 
-# ========= HANDLERS =======
+# ========= Telegram Handlers =========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "👋 Bot de farmacia listo.\nComandos: /actualizar /info /modelos /ping"
-    )
+    await update.message.reply_text("👋 Bot de farmacia listo.\nComandos: /actualizar /info /modelos /ping")
 
 async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔄 Recargando catálogo...")
@@ -171,14 +161,11 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_msg = update.message.text
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-
     catalog = get_catalog()
     if not catalog:
         await update.message.reply_text(f"⚠️ Sin catálogo. Coloca PDFs en '{PDF_FOLDER}' y usa /actualizar.")
         return
-
     content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {user_msg}\nResponde en español."
-
     async with AsyncAnthropic(api_key=ANTHROPIC_API_KEY, http_client=DefaultAioHttpClient(), timeout=60.0, max_retries=2) as client:
         model_id = await pick_available_model(client)
         try:
@@ -189,43 +176,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception as e:
             await update.message.reply_text(f"❌ Error consultando IA: {e}")
             return
+        response_text = "".join(getattr(b, "text", "") for b in getattr(message, "content", []) if getattr(b, "type", "") == "text") or "(Sin contenido)"
+        MAX_LEN = 3900
+        for i in range(0, len(response_text), MAX_LEN):
+            await update.message.reply_text(response_text[i : i + MAX_LEN])
 
-    response_text = "".join(
-        getattr(b, "text", "") for b in getattr(message, "content", [])
-        if getattr(b, "type", "") == "text"
-    ) or "(Sin contenido)"
+# ========= Flask API =========
+web_app = Flask(__name__)
 
-    MAX_LEN = 3900
-    for i in range(0, len(response_text), MAX_LEN):
-        await update.message.reply_text(response_text[i : i + MAX_LEN])
+@web_app.route("/consulta", methods=["POST"])
+def consulta():
+    pregunta = request.json.get("pregunta")
+    catalog = get_catalog()
+    if not catalog:
+        return jsonify({"error": "Sin catálogo cargado"}), 400
+    content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {pregunta}\nResponde en español."
+    # Aquí podrías llamar a Anthropic igual que en handle_message (simplificado por ahora)
+    return jsonify({"respuesta": f"Procesando pregunta: {pregunta}"})
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.getLogger(__name__).error("Excepción:", exc_info=context.error)
-    if isinstance(update, Update) and update.effective_chat:
-        try:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="⚠️ Hubo un inconveniente. Intenta nuevamente."
-            )
-        except Exception:
-            pass
+def run_flask():
+    web_app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
-def main() -> None:
-    Path(PDF_FOLDER).mkdir(exist_ok=True)
-    if not os.path.exists(CATALOG_FILE):
-        _ = load_all_pdfs()
-
+def run_telegram():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("actualizar", reload_command))
     app.add_handler(CommandHandler("info", info_command))
-    app.add_handler(CommandHandler("modelos", modelos_command))
     app.add_handler(CommandHandler("ping", ping_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_error_handler(error_handler)
-
-    logging.getLogger(__name__).info("Bot iniciado (Render).")
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_flask).start()
+    run_telegram()
+ 
