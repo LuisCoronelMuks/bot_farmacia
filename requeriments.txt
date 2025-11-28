@@ -1,0 +1,5 @@
+python-telegram-bot==22.5
+anthropic
+httpx
+PyPDF2
+anthropic[aiohttp]

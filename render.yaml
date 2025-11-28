@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: farmacia-bot-telegram
+    env: python
+    plan: starter
+    pythonVersion: 3.11
+    startCommand: python telegram-pharmacy-bot.py
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false      # Se ingresa el valor en el dashboard; no lo guardes en YAML
+      - key: ANTHROPIC_API_KEY
+        sync: false
