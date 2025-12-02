@@ -5,4 +5,6 @@ PyPDF2
 anthropic[aiohttp]
 Flask
 Flask-Cors
+openpyxl        # para .xlsx
+xlrd            # por si algún día lees .xls
 pandas
