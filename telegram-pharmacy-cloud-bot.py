@@ -68,20 +68,21 @@ def get_catalog() -> str:
 # ========= Excel ==========
 def load_promotions_and_bonuses() -> str:
     if not os.path.exists(PROMO_FILE):
-        logger.warning(f"No se encontró el archivo de promociones '{PROMO_FILE}'")
+        logger.warning(f"No se encontró el archivo de promociones ... '{PROMO_FILE}'")
         return ""
     try:
-        xls = pd.ExcelFile(PROMO_FILE)
+        # Usa el motor openpyxl explícitamente
+        xls = pd.ExcelFile(PROMO_FILE, engine="openpyxl")
         text_blocks = []
         for sheet_name in xls.sheet_names:
-            df = pd.read_excel(PROMO_FILE, sheet_name=sheet_name)
+            df = pd.read_excel(PROMO_FILE, sheet_name=sheet_name, engine="openpyxl")
             df.fillna("-", inplace=True)
             text_blocks.append(f"\n{'='*60}\nHOJA: {sheet_name}\n{'='*60}\n")
             text_blocks.append(df.to_string(index=False))
         return "\n".join(text_blocks)
     except Exception as e:
         logger.error(f"Error leyendo Excel: {e}")
-        return ""
+        return f"(Error leyendo Excel: {e})"
 
 def get_full_knowledge() -> str:
     catalog_text = get_catalog()
