@@ -136,6 +136,28 @@ async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TY
     promos = load_promotions_and_bonuses()
     await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
 
+
+async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔄 Recargando promociones y bonificaciones...")
+    
+    # Mostrar la ruta esperada
+    await update.message.reply_text(f"Ruta esperada: {PROMO_FILE}")
+    
+    # Verificar si el archivo existe
+    if os.path.exists(PROMO_FILE):
+        await update.message.reply_text("✅ Archivo encontrado en el contenedor.")
+    else:
+        await update.message.reply_text("⚠️ Archivo NO encontrado en el contenedor.")
+    
+    # Listar archivos en el directorio actual (para confirmar qué hay)
+    files = os.listdir(".")
+    await update.message.reply_text(f"Archivos en el contenedor: {files}")
+    
+    # Intentar cargar promociones
+    promos = load_promotions_and_bonuses()
+    await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
+
+
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pdf_files = list(Path(PDF_FOLDER).glob("*.pdf"))
     info = f"📊 **Catálogo**\n📁 {PDF_FOLDER}\n📄 PDFs: {len(pdf_files)}\n"
