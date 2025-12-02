@@ -1,3 +1,5 @@
+NUEVO
+
 
 # -*- coding: utf-8 -*-
 import os
@@ -7,6 +9,7 @@ from flask import Flask, request, jsonify
 from pathlib import Path
 from datetime import datetime
 import PyPDF2
+import pandas as pd
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -20,6 +23,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 PDF_FOLDER = os.getenv("PDF_FOLDER", "catalogos_pdfs")
 CATALOG_FILE = os.getenv("CATALOG_FILE", "catalogo_procesado.txt")
+PROMO_FILE = os.getenv("PROMO_FILE", "FORMATO PROMOCIONAL.xlsx")
 
 # ========= LOGGING ========
 logging.basicConfig(
@@ -64,31 +68,43 @@ def get_catalog() -> str:
             return f.read()
     return load_all_pdfs()
 
-# ======================================================
-# PROMPT DE SISTEMA PARA CLAUDE
-# ======================================================
-###SYSTEM_PROMPT = """Eres un asistente de farmacia. Responde en español, usa emojis (💊🔍💰✅), proporciona código, nombre, precio, principio activo y laboratorio. Sé amigable y conciso."""
-SYSTEM_PROMPT = """Eres un asistente especializado de farmacia que ayuda al personal a buscar información sobre productos nuevos.
-Tu base de conocimiento contiene el catálogo completo de productos nuevos extraído de los PDFs oficiales.
+# ========= Excel ==========
+def load_promotions_and_bonuses() -> str:
+    if not os.path.exists(PROMO_FILE):
+        logger.warning(f"No se encontró el archivo de promociones '{PROMO_FILE}'")
+        return ""
+    try:
+        xls = pd.ExcelFile(PROMO_FILE)
+        text_blocks = []
+        for sheet_name in xls.sheet_names:
+            df = pd.read_excel(PROMO_FILE, sheet_name=sheet_name)
+            df.fillna("-", inplace=True)
+            text_blocks.append(f"\n{'='*60}\nHOJA: {sheet_name}\n{'='*60}\n")
+            text_blocks.append(df.to_string(index=False))
+        return "\n".join(text_blocks)
+    except Exception as e:
+        logger.error(f"Error leyendo Excel: {e}")
+        return ""
+
+def get_full_knowledge() -> str:
+    catalog_text = get_catalog()
+    promo_text = load_promotions_and_bonuses()
+    combined = f"CATÁLOGO DE PRODUCTOS:\n{catalog_text}\n\nPROMOCIONES Y BONIFICACIONES:\n{promo_text}"
+    return combined
+
+# ========= PROMPT =========
+SYSTEM_PROMPT = """
+Eres un asistente especializado de farmacia que ayuda al personal a buscar información sobre:
+- Productos nuevos (catálogo PDF)
+- Promociones y Bonificaciones (archivo Excel)
 
 INSTRUCCIONES:
-1) Responde en español, de forma amigable y profesional.
-2) Incluye toda la información disponible del producto:
-   - Código
-   - Nombre
-   - Precio (S/)
-   - Principio activo (si aplica)
-   - Laboratorio/Proveedor
-   - Categoría
-   - Notas especiales (cadena de frío, usos médicos, etc.)
-   - Nombre del Documento PDF donde se encuentra el detalle
-3) Si hay múltiples resultados, muéstralos organizados.
-4) Si requiere condiciones especiales (p.ej. cadena de frío), indícalo con ⚠️.
-5) Puedes comparar, sugerir alternativas más económicas y responder composiciones.
-6) Si no encuentras el producto, sugiere similares.
-7) Usa emojis para claridad:
-   💊 medicamentos | 🏥 dispositivos | 💰 precios | 🔎 búsquedas | ⚠️ advertencias
-   ✅ confirmación | 📦 producto | 🧴 dermocosméticos | 👶 infantiles | 💪 suplementos
+1) Responde en español, amigable y profesional.
+2) Si la consulta es sobre productos, incluye: Código, Nombre, Precio (S/), Principio activo (si aplica), Laboratorio, Categoría, Notas especiales (cadena de frío, usos médicos, etc.), Documento origen.
+3) Si la consulta es sobre promociones/bonificaciones, incluye: Tipo de promoción (Pack, Descuento, 2x1, 3x2), Fechas de vigencia, Precio oferta, Laboratorio, Observaciones.
+4) Usa emojis para claridad: 💊 productos, 💰 precios, 🎁 promociones, ✅ confirmación, ⚠️ advertencias.
+5) Si hay múltiples resultados, organiza en lista.
+6) Si no encuentras exacto, sugiere similares.
 """
 
 PREFERRED_ALIAS = "claude-sonnet-4-5"
@@ -111,43 +127,35 @@ async def pick_available_model(client: AsyncAnthropic) -> str:
 
 # ========= Telegram Handlers =========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("👋 Bot de farmacia listo.\nComandos: /actualizar /info /modelos /ping")
+    await update.message.reply_text("👋 Bot listo.\nComandos: /actualizar /promos /info /modelos /ping")
 
 async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔄 Recargando catálogo...")
     catalog = load_all_pdfs()
-    if catalog:
-        await update.message.reply_text(f"✅ Catálogo listo ({len(catalog)} chars)")
-    else:
-        await update.message.reply_text(f"⚠️ No hay PDFs en '{PDF_FOLDER}'")
+    await update.message.reply_text(f"✅ Catálogo listo ({len(catalog)} chars)" if catalog else f"⚠️ No hay PDFs en '{PDF_FOLDER}'")
+
+async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔄 Recargando promociones y bonificaciones...")
+    promos = load_promotions_and_bonuses()
+    await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pdf_files = list(Path(PDF_FOLDER).glob("*.pdf"))
+    info = f"📊 **Catálogo**\n📁 {PDF_FOLDER}\n📄 PDFs: {len(pdf_files)}\n"
     if os.path.exists(CATALOG_FILE):
         file_time = datetime.fromtimestamp(os.path.getmtime(CATALOG_FILE))
         file_size = os.path.getsize(CATALOG_FILE)
-        info = (
-            f"📈 **Catálogo**\n📁 {PDF_FOLDER}\n📄 PDFs: {len(pdf_files)}\n"
-            f"🕒 {file_time.strftime('%d/%m/%Y %H:%M')}\n💾 {file_size:,} bytes\n"
-        )
-        for pdf in sorted(pdf_files):
-            info += f" • {pdf.name}\n"
-        await update.message.reply_text(info, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text("⚠️ No hay catálogo cargado. Usa /actualizar.")
+        info += f"🕒 {file_time.strftime('%d/%m/%Y %H:%M')}\n💾 {file_size:,} bytes\n"
+    for pdf in sorted(pdf_files):
+        info += f" • {pdf.name}\n"
+    await update.message.reply_text(info, parse_mode=ParseMode.MARKDOWN)
 
 async def modelos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     async with AsyncAnthropic(api_key=ANTHROPIC_API_KEY, http_client=DefaultAioHttpClient(), timeout=30.0) as c:
         page = await c.models.list()
-        ids = []
-        for m in getattr(page, "data", []):
-            mid = getattr(m, "id", None) or (isinstance(m, dict) and m.get("id"))
-            if mid:
-                ids.append(mid)
-        await update.message.reply_text(
-            "🧠 Modelos:\n" + "\n".join(f"• {x}" for x in ids) if ids else "⚠️ Lista vacía"
-        )
+        ids = [getattr(m, "id", None) or (isinstance(m, dict) and m.get("id")) for m in getattr(page, "data", []) if m]
+        await update.message.reply_text("🧠 Modelos:\n" + "\n".join(f"• {x}" for x in ids) if ids else "⚠️ Lista vacía")
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
@@ -161,11 +169,11 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_msg = update.message.text
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    catalog = get_catalog()
-    if not catalog:
-        await update.message.reply_text(f"⚠️ Sin catálogo. Coloca PDFs en '{PDF_FOLDER}' y usa /actualizar.")
+    knowledge = get_full_knowledge()
+    if not knowledge:
+        await update.message.reply_text(f"⚠️ Sin datos. Coloca PDFs y Excel, luego usa /actualizar y /promos.")
         return
-    content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {user_msg}\nResponde en español."
+    content = f"BASE DE CONOCIMIENTO:\n{knowledge}\n---\nPregunta: {user_msg}\nResponde en español."
     async with AsyncAnthropic(api_key=ANTHROPIC_API_KEY, http_client=DefaultAioHttpClient(), timeout=60.0, max_retries=2) as client:
         model_id = await pick_available_model(client)
         try:
@@ -186,43 +194,22 @@ web_app = Flask(__name__)
 from flask_cors import CORS
 CORS(web_app)
 
-### @web_app.route("/consulta", methods=["POST"])
-### def consulta():
-###     pregunta = request.json.get("pregunta")
-###     catalog = get_catalog()
-###     if not catalog:
-###         return jsonify({"error": "Sin catálogo cargado"}), 400
-###     content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {pregunta}\nResponde en español."
-###     # Aquí podrías llamar a Anthropic igual que en handle_message (simplificado por ahora)
-###     return jsonify({"respuesta": f"Procesando pregunta: {pregunta}"})
-
 @web_app.route("/consulta", methods=["POST"])
 def consulta():
     pregunta = request.json.get("pregunta")
-    catalog = get_catalog()
-    if not catalog:
-        return jsonify({"error": "Sin catálogo cargado"}), 400
-
-    content = f"CATÁLOGO:\n{catalog}\n---\nPregunta: {pregunta}\nResponde en español."
-
-    # Llamada a Anthropic (igual que en handle_message)
+    knowledge = get_full_knowledge()
+    if not knowledge:
+        return jsonify({"error": "Sin datos cargados"}), 400
+    content = f"BASE DE CONOCIMIENTO:\n{knowledge}\n---\nPregunta: {pregunta}\nResponde en español."
     import asyncio
-
     async def call_anthropic():
         async with AsyncAnthropic(api_key=ANTHROPIC_API_KEY, http_client=DefaultAioHttpClient(), timeout=60.0, max_retries=2) as client:
             model_id = await pick_available_model(client)
             message = await client.messages.create(
-                model=model_id,
-                max_tokens=2048,
-                system=SYSTEM_PROMPT,
+                model=model_id, max_tokens=2048, system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": content}],
             )
-            response_text = "".join(
-                getattr(b, "text", "") for b in getattr(message, "content", [])
-                if getattr(b, "type", "") == "text"
-            ) or "(Sin contenido)"
-            return response_text
-
+            return "".join(getattr(b, "text", "") for b in getattr(message, "content", []) if getattr(b, "type", "") == "text") or "(Sin contenido)"
     respuesta = asyncio.run(call_anthropic())
     return jsonify({"respuesta": respuesta})
 
@@ -233,7 +220,9 @@ def run_telegram():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("actualizar", reload_command))
+    app.add_handler(CommandHandler("promos", reload_promos_command))
     app.add_handler(CommandHandler("info", info_command))
+    app.add_handler(CommandHandler("modelos", modelos_command))
     app.add_handler(CommandHandler("ping", ping_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
@@ -241,4 +230,3 @@ def run_telegram():
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     run_telegram()
- 
