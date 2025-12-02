@@ -5,3 +5,4 @@ PyPDF2
 anthropic[aiohttp]
 Flask
 Flask-Cors
+pandas
