@@ -131,11 +131,10 @@ async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     catalog = load_all_pdfs()
     await update.message.reply_text(f"✅ Catálogo listo ({len(catalog)} chars)" if catalog else f"⚠️ No hay PDFs en '{PDF_FOLDER}'")
 
-async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🔄 Recargando promociones y bonificaciones...")
-    promos = load_promotions_and_bonuses()
-    await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
-
+### async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+###     await update.message.reply_text("🔄 Recargando promociones y bonificaciones...")
+###     promos = load_promotions_and_bonuses()
+###     await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
 
 async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔄 Recargando promociones y bonificaciones...2")
@@ -156,7 +155,6 @@ async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TY
     # Intentar cargar promociones
     promos = load_promotions_and_bonuses()
     await update.message.reply_text(f"✅ Promociones cargadas ({len(promos)} chars)" if promos else "⚠️ No se encontró el archivo de promociones.")
-
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pdf_files = list(Path(PDF_FOLDER).glob("*.pdf"))
