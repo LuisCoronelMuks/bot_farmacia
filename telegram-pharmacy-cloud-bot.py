@@ -138,7 +138,7 @@ async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def reload_promos_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🔄 Recargando promociones y bonificaciones...")
+    await update.message.reply_text("🔄 Recargando promociones y bonificaciones...2")
     
     # Mostrar la ruta esperada
     await update.message.reply_text(f"Ruta esperada: {PROMO_FILE}")
